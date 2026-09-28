@@ -113,4 +113,33 @@ mod tests {
         assert_eq!(model.height_for(2), None);
         assert_eq!(model.height_for(4), None);
     }
+    #[test]
+    fn measured_height_has_priority_over_model_prediction() {
+        let model = CompressionModel::from_measurements(vec![
+            CompressionMeasurement::new(1, 38.0).unwrap(),
+            CompressionMeasurement::new(2, 69.0).unwrap(),
+            CompressionMeasurement::new(3, 102.0).unwrap(),
+            CompressionMeasurement::new(4, 132.0).unwrap(),
+        ])
+        .unwrap();
+
+        assert_eq!(model.height_for(1), Some(38.0));
+        assert_eq!(model.height_for(2), Some(69.0));
+        assert_eq!(model.height_for(3), Some(102.0));
+        assert_eq!(model.height_for(4), Some(132.0));
+    }
+    #[test]
+    fn unmeasured_height_is_not_treated_as_ground_truth() {
+        let model = CompressionModel::from_measurements(vec![
+            CompressionMeasurement::new(1, 38.0).unwrap(),
+            CompressionMeasurement::new(3, 102.0).unwrap(),
+            CompressionMeasurement::new(4, 132.0).unwrap(),
+        ])
+       .unwrap();
+
+       assert_eq!(model.height_for(1), Some(38.0));
+       assert_eq!(model.height_for(3), Some(102.0));
+       assert_eq!(model.height_for(4), Some(132.0));
+       assert_eq!(model.height_for(2), None);
+   }
 }
