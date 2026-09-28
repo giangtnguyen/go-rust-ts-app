@@ -48,16 +48,17 @@ impl Rect {
     fn contains(&self, item: Dimensions) -> bool {
         item.width <= self.width && item.height <= self.height
     }
-
-    fn area(&self) -> f64 {
-        self.width * self.height
-    }
 }
-
-fn split_free_rectangles(
-    free_rect: Rect,
-    item: Dimensions,
-) -> Vec<Rect> {
+fn placement_fits_container(placement: Placement, container: Dimensions) -> bool {
+    placement.x >= 0.0
+        && placement.y >= 0.0
+        && placement.x + placement.width <= container.width
+        && placement.y + placement.height <= container.height
+}
+fn placements_overlap(a: Placement, b: Placement) -> bool {
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+}
+fn split_free_rectangles(free_rect: Rect, item: Dimensions) -> Vec<Rect> {
     if !free_rect.contains(item) {
         return Vec::new();
     }
@@ -159,10 +160,7 @@ pub fn calculate(request: &PackingRequest) -> PackingResult {
         utilization,
     }
 }
-fn calculate_mixed_capacity(
-    container: Dimensions,
-    item: Dimensions,
-) -> Vec<Placement> {
+fn calculate_mixed_capacity(container: Dimensions, item: Dimensions) -> Vec<Placement> {
     let orientations = [item, item.rotated()];
 
     let initial_free_rect = Rect {
@@ -222,18 +220,11 @@ fn search_mixed(
                 }
             }
 
-            next_free_rects.extend(
-                split_free_rectangles(free_rect, orientation)
-            );
+            next_free_rects.extend(split_free_rectangles(free_rect, orientation));
 
             placements.push(placement);
 
-            search_mixed(
-                next_free_rects,
-                orientations,
-                placements,
-                best_placements,
-            );
+            search_mixed(next_free_rects, orientations, placements, best_placements);
 
             placements.pop();
         }
@@ -569,124 +560,196 @@ mod tests {
     }
     #[test]
     fn splits_free_rectangle_after_placement() {
-       let free_rect = Rect {
-           x: 0.0,
-           y: 0.0,
-           width: 5.0,
-           height: 5.0,
-       };
+        let free_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 5.0,
+            height: 5.0,
+        };
 
-       let item = Dimensions::new(2.0, 3.0).unwrap();
+        let item = Dimensions::new(2.0, 3.0).unwrap();
 
-       let result = split_free_rectangles(free_rect, item);
+        let result = split_free_rectangles(free_rect, item);
 
-       assert_eq!(result.len(), 2);
+        assert_eq!(result.len(), 2);
 
-       assert_eq!(
-          result[0],
-          Rect {
-             x: 2.0,
-             y: 0.0,
-             width: 3.0,
-             height: 5.0,
-           }
+        assert_eq!(
+            result[0],
+            Rect {
+                x: 2.0,
+                y: 0.0,
+                width: 3.0,
+                height: 5.0,
+            }
         );
 
         assert_eq!(
-           result[1],
-           Rect {
-               x: 0.0,
-               y: 3.0,
-               width: 2.0,
-               height: 2.0,
-           }
+            result[1],
+            Rect {
+                x: 0.0,
+                y: 3.0,
+                width: 2.0,
+                height: 2.0,
+            }
         );
-     }
+    }
     #[test]
     fn splits_free_rectangle_with_rotated_item() {
-       let free_rect = Rect {
-           x: 0.0,
-           y: 0.0,
-           width: 5.0,
-           height: 5.0,
-       };
+        let free_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 5.0,
+            height: 5.0,
+        };
 
-       let item = Dimensions::new(3.0, 2.0).unwrap();
+        let item = Dimensions::new(3.0, 2.0).unwrap();
 
-       let result = split_free_rectangles(free_rect, item);
+        let result = split_free_rectangles(free_rect, item);
 
-       assert_eq!(result.len(), 2);
+        assert_eq!(result.len(), 2);
 
-       assert_eq!(
-           result[0],
-           Rect {
-             x: 3.0,
-             y: 0.0,
-             width: 2.0,
-             height: 5.0,
-           }
-       );
+        assert_eq!(
+            result[0],
+            Rect {
+                x: 3.0,
+                y: 0.0,
+                width: 2.0,
+                height: 5.0,
+            }
+        );
 
-       assert_eq!(
-           result[1],
-           Rect {
-             x: 0.0,
-             y: 2.0,
-             width: 3.0,
-             height: 3.0,
-           }
-       );
+        assert_eq!(
+            result[1],
+            Rect {
+                x: 0.0,
+                y: 2.0,
+                width: 3.0,
+                height: 3.0,
+            }
+        );
     }
     #[test]
     fn splitting_when_item_does_not_fit_returns_empty() {
-       let free_rect = Rect {
-           x: 0.0,
-           y: 0.0,
-           width: 2.0,
-           height: 2.0,
-       };
+        let free_rect = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 2.0,
+            height: 2.0,
+        };
 
-       let item = Dimensions::new(2.0, 3.0).unwrap();
+        let item = Dimensions::new(2.0, 3.0).unwrap();
 
-       let result = split_free_rectangles(free_rect, item);
+        let result = split_free_rectangles(free_rect, item);
 
-       assert!(result.is_empty());
+        assert!(result.is_empty());
     }
-   #[test]
-   fn search_mixed_finds_three_items() {
-      let container = Rect {
-        x: 0.0,
-        y: 0.0,
-        width: 5.0,
-        height: 5.0,
-      };
+    #[test]
+    fn search_mixed_finds_three_items() {
+        let container = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 5.0,
+            height: 5.0,
+        };
 
-      let item = Dimensions::new(2.0, 3.0).unwrap();
-      let orientations = [item, item.rotated()];
-      let mut placements = Vec::new();
-      let mut best_placements = Vec::new();
-      search_mixed(
-          vec![container],
-          &orientations,
-          &mut placements,
-          &mut best_placements,
-      );
-
-      assert_eq!(best_placements.len(), 3);
-   } 
-   #[test]
-   fn search_mixed_returns_best_placements() {
-      let container = Dimensions::new(5.0, 5.0).unwrap();
-      let item = Dimensions::new(2.0, 3.0).unwrap();
-
-      let result = calculate_mixed_capacity(container, item);
-      assert_eq!(result.len(), 3);
-
-      for placement in &result {
-          assert!(
-            (placement.width == 2.0 && placement.height == 3.0)
-                || (placement.width == 3.0 && placement.height == 2.0)
+        let item = Dimensions::new(2.0, 3.0).unwrap();
+        let orientations = [item, item.rotated()];
+        let mut placements = Vec::new();
+        let mut best_placements = Vec::new();
+        search_mixed(
+            vec![container],
+            &orientations,
+            &mut placements,
+            &mut best_placements,
         );
-      }
-   }
+
+        assert_eq!(best_placements.len(), 3);
+    }
+    #[test]
+    fn search_mixed_returns_best_placements() {
+        let container = Dimensions::new(5.0, 5.0).unwrap();
+        let item = Dimensions::new(2.0, 3.0).unwrap();
+
+        let result = calculate_mixed_capacity(container, item);
+        assert_eq!(result.len(), 3);
+
+        for placement in &result {
+            assert!(
+                (placement.width == 2.0 && placement.height == 3.0)
+                    || (placement.width == 3.0 && placement.height == 2.0)
+            );
+        }
+    }
+    #[test]
+    fn mixed_placements_fit_inside_container() {
+        let container = Dimensions::new(5.0, 5.0).unwrap();
+        let item = Dimensions::new(2.0, 3.0).unwrap();
+
+        let placements = calculate_mixed_capacity(container, item);
+
+        assert_eq!(placements.len(), 3);
+
+        for placement in placements {
+            assert!(placement_fits_container(placement, container));
+        }
+    }
+    #[test]
+    fn mixed_placements_do_not_overlap() {
+        let container = Dimensions::new(5.0, 5.0).unwrap();
+        let item = Dimensions::new(2.0, 3.0).unwrap();
+
+        let placements = calculate_mixed_capacity(container, item);
+
+        for i in 0..placements.len() {
+            for j in (i + 1)..placements.len() {
+                assert!(
+                    !placements_overlap(placements[i], placements[j]),
+                    "placements overlap: {:?} and {:?}",
+                    placements[i],
+                    placements[j]
+                );
+            }
+        }
+    }
+    #[test]
+    fn mixed_packing_finds_four_items_in_two_by_two_layout() {
+        let container = Dimensions::new(4.0, 6.0).unwrap();
+        let item = Dimensions::new(2.0, 3.0).unwrap();
+
+        let placements = calculate_mixed_capacity(container, item);
+
+        assert_eq!(placements.len(), 4);
+
+        for placement in &placements {
+            assert!(placement_fits_container(*placement, container));
+        }
+
+        for i in 0..placements.len() {
+            for j in (i + 1)..placements.len() {
+                assert!(!placements_overlap(placements[i], placements[j]));
+            }
+        }
+    }
+    #[test]
+    fn mixed_packing_finds_two_items_in_one_by_two_layout() {
+        let container = Dimensions::new(2.0, 6.0).unwrap();
+        let item = Dimensions::new(2.0, 3.0).unwrap();
+
+        let placements = calculate_mixed_capacity(container, item);
+
+        assert_eq!(placements.len(), 2);
+    }
+    #[test]
+    fn mixed_packing_finds_six_items_in_three_by_two_layout() {
+        let container = Dimensions::new(6.0, 6.0).unwrap();
+        let item = Dimensions::new(2.0, 3.0).unwrap();
+
+        let placements = calculate_mixed_capacity(container, item);
+
+        assert_eq!(placements.len(), 6);
+
+        for placement in &placements {
+            assert!(placement_fits_container(*placement, container));
+        }
+    }
 }
