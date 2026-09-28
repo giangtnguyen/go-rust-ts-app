@@ -53,18 +53,8 @@ pub fn calculate(request: &PackingRequest) -> PackingResult {
         }
     };
 
-    let container_width = container.width;
-    let container_height = container.height;
     let item_width = item.width;
     let item_height = item.height;
-    if !valid_dimensions(container_width, container_height, item_width, item_height) {
-        return PackingResult {
-            max_items: 0,
-            item_width,
-            item_height,
-            utilization: 0.0,
-        };
-    }
     let (max_items, result_item) = choose_orientation(container, item, request.allow_rotation);
 
     let result_width = result_item.width;
@@ -121,16 +111,6 @@ fn choose_orientation(
     } else {
         (normal, item)
     }
-}
-fn valid_dimensions(
-    container_width: f64,
-    container_height: f64,
-    item_width: f64,
-    item_height: f64,
-) -> bool {
-    [container_width, container_height, item_width, item_height]
-        .iter()
-        .all(|value| value.is_finite() && *value > 0.0)
 }
 fn calculate_orientation(
     container_width: f64,
