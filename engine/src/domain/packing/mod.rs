@@ -35,6 +35,15 @@ struct Rect {
     width: f64,
     height: f64,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Placement {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
 impl Rect {
     fn contains(&self, item: Dimensions) -> bool {
         item.width <= self.width && item.height <= self.height
@@ -112,12 +121,17 @@ pub fn calculate(request: &PackingRequest) -> PackingResult {
     let (uniform_capacity, uniform_item) =
         choose_orientation(container, item, request.allow_rotation);
 
-    let mixed_capacity = if request.allow_rotation {
+    let mixed_placements = if request.allow_rotation {
         calculate_mixed_capacity(container, item)
+    } else {
+        Vec::new()
+    };
+
+    let mixed_capacity = if request.allow_rotation {
+        Some(mixed_placements.len() as u32)
     } else {
         uniform_capacity
     };
-
     let (max_items, result_item) = match (uniform_capacity, mixed_capacity) {
         (Some(uniform), Some(mixed)) if mixed > uniform => {
             (mixed, Dimensions::new(item.width, item.height).unwrap())
@@ -148,7 +162,7 @@ pub fn calculate(request: &PackingRequest) -> PackingResult {
 fn calculate_mixed_capacity(
     container: Dimensions,
     item: Dimensions,
-) -> Option<u32> {
+) -> Vec<Placement> {
     let orientations = [item, item.rotated()];
 
     let initial_free_rect = Rect {
@@ -158,25 +172,27 @@ fn calculate_mixed_capacity(
         height: container.height,
     };
 
-    let mut best = 0;
+    let mut placements = Vec::new();
+    let mut best_placements = Vec::new();
 
     search_mixed(
         vec![initial_free_rect],
         &orientations,
-        0,
-        &mut best,
+        &mut placements,
+        &mut best_placements,
     );
 
-    Some(best)
+    best_placements
 }
 fn search_mixed(
     free_rects: Vec<Rect>,
     orientations: &[Dimensions],
-    placed: u32,
-    best: &mut u32,
+    placements: &mut Vec<Placement>,
+    best_placements: &mut Vec<Placement>,
 ) {
-    if placed > *best {
-        *best = placed;
+    // Nếu nghiệm hiện tại tốt hơn nghiệm tốt nhất
+    if placements.len() > best_placements.len() {
+        *best_placements = placements.clone();
     }
 
     if free_rects.is_empty() {
@@ -191,6 +207,13 @@ fn search_mixed(
                 continue;
             }
 
+            let placement = Placement {
+                x: free_rect.x,
+                y: free_rect.y,
+                width: orientation.width,
+                height: orientation.height,
+            };
+
             let mut next_free_rects = Vec::new();
 
             for (other_index, &other_rect) in free_rects.iter().enumerate() {
@@ -203,12 +226,16 @@ fn search_mixed(
                 split_free_rectangles(free_rect, orientation)
             );
 
+            placements.push(placement);
+
             search_mixed(
                 next_free_rects,
                 orientations,
-                placed + 1,
-                best,
+                placements,
+                best_placements,
             );
+
+            placements.pop();
         }
     }
 }
@@ -636,16 +663,30 @@ mod tests {
 
       let item = Dimensions::new(2.0, 3.0).unwrap();
       let orientations = [item, item.rotated()];
-
-      let mut best = 0;
-
+      let mut placements = Vec::new();
+      let mut best_placements = Vec::new();
       search_mixed(
-        vec![container],
-        &orientations,
-        0,
-        &mut best,
+          vec![container],
+          &orientations,
+          &mut placements,
+          &mut best_placements,
       );
 
-      assert_eq!(best, 3);
+      assert_eq!(best_placements.len(), 3);
+   } 
+   #[test]
+   fn search_mixed_returns_best_placements() {
+      let container = Dimensions::new(5.0, 5.0).unwrap();
+      let item = Dimensions::new(2.0, 3.0).unwrap();
+
+      let result = calculate_mixed_capacity(container, item);
+      assert_eq!(result.len(), 3);
+
+      for placement in &result {
+          assert!(
+            (placement.width == 2.0 && placement.height == 3.0)
+                || (placement.width == 3.0 && placement.height == 2.0)
+        );
+      }
    }
 }
