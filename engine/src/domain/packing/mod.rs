@@ -1,3 +1,4 @@
+mod compression;
 mod dimensions;
 use dimensions::Dimensions;
 use serde::{Deserialize, Serialize};
@@ -751,5 +752,21 @@ mod tests {
         for placement in &placements {
             assert!(placement_fits_container(*placement, container));
         }
+    }
+    #[test]
+    fn mixed_packing_uses_both_orientations() {
+        let container = Dimensions::new(5.0, 5.0).unwrap();
+        let item = Dimensions::new(2.0, 3.0).unwrap();
+
+        let placements = calculate_mixed_capacity(container, item);
+
+        assert_eq!(placements.len(), 3);
+
+        let has_normal = placements.iter().any(|p| p.width == 2.0 && p.height == 3.0);
+
+        let has_rotated = placements.iter().any(|p| p.width == 3.0 && p.height == 2.0);
+
+        assert!(has_normal);
+        assert!(has_rotated);
     }
 }
