@@ -371,4 +371,24 @@ mod tests {
 
         assert_eq!(result, None);
     }
+    #[test]
+    fn rotation_selects_better_capacity() {
+        let request = PackingRequest {
+            container: Container {
+                width: 10.0,
+                height: 7.0,
+            },
+            item: Item {
+                width: 6.0,
+                height: 4.0,
+            },
+            allow_rotation: true,
+        };
+
+        let result = calculate(&request);
+
+        assert_eq!(result.max_items, 2);
+        assert_eq!(result.item_width, 4.0);
+        assert_eq!(result.item_height, 6.0);
+    }
 }
