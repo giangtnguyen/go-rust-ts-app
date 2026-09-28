@@ -28,6 +28,59 @@ pub struct PackingResult {
     pub item_height: f64,
     pub utilization: f64,
 }
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Rect {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+impl Rect {
+    fn contains(&self, item: Dimensions) -> bool {
+        item.width <= self.width && item.height <= self.height
+    }
+
+    fn area(&self) -> f64 {
+        self.width * self.height
+    }
+}
+
+fn split_free_rectangles(
+    free_rect: Rect,
+    item: Dimensions,
+) -> Vec<Rect> {
+    if !free_rect.contains(item) {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+
+    let remaining_width = free_rect.width - item.width;
+    let remaining_height = free_rect.height - item.height;
+
+    // Phần bên phải item
+    if remaining_width > 0.0 {
+        result.push(Rect {
+            x: free_rect.x + item.width,
+            y: free_rect.y,
+            width: remaining_width,
+            height: free_rect.height,
+        });
+    }
+
+    // Phần phía dưới item
+    if remaining_height > 0.0 {
+        result.push(Rect {
+            x: free_rect.x,
+            y: free_rect.y + item.height,
+            width: item.width,
+            height: remaining_height,
+        });
+    }
+
+    result
+}
+
 pub fn calculate(request: &PackingRequest) -> PackingResult {
     let container = match Dimensions::new(request.container.width, request.container.height) {
         Some(value) => value,
@@ -55,13 +108,23 @@ pub fn calculate(request: &PackingRequest) -> PackingResult {
 
     let item_width = item.width;
     let item_height = item.height;
-    let (max_items, result_item) = choose_orientation(container, item, request.allow_rotation);
 
-    let result_width = result_item.width;
-    let result_height = result_item.height;
-    let max_items = match max_items {
-        Some(value) => value,
-        None => {
+    let (uniform_capacity, uniform_item) =
+        choose_orientation(container, item, request.allow_rotation);
+
+    let mixed_capacity = if request.allow_rotation {
+        calculate_mixed_capacity(container, item)
+    } else {
+        uniform_capacity
+    };
+
+    let (max_items, result_item) = match (uniform_capacity, mixed_capacity) {
+        (Some(uniform), Some(mixed)) if mixed > uniform => {
+            (mixed, Dimensions::new(item.width, item.height).unwrap())
+        }
+        (Some(uniform), _) => (uniform, uniform_item),
+        (None, Some(mixed)) => (mixed, item),
+        (None, None) => {
             return PackingResult {
                 max_items: 0,
                 item_width,
@@ -70,15 +133,83 @@ pub fn calculate(request: &PackingRequest) -> PackingResult {
             };
         }
     };
+
     let used_area = max_items as f64 * item.area();
     let container_area = container.area();
     let utilization = (used_area / container_area).clamp(0.0, 1.0);
 
     PackingResult {
         max_items,
-        item_width: result_width,
-        item_height: result_height,
+        item_width: result_item.width,
+        item_height: result_item.height,
         utilization,
+    }
+}
+fn calculate_mixed_capacity(
+    container: Dimensions,
+    item: Dimensions,
+) -> Option<u32> {
+    let orientations = [item, item.rotated()];
+
+    let initial_free_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: container.width,
+        height: container.height,
+    };
+
+    let mut best = 0;
+
+    search_mixed(
+        vec![initial_free_rect],
+        &orientations,
+        0,
+        &mut best,
+    );
+
+    Some(best)
+}
+fn search_mixed(
+    free_rects: Vec<Rect>,
+    orientations: &[Dimensions],
+    placed: u32,
+    best: &mut u32,
+) {
+    if placed > *best {
+        *best = placed;
+    }
+
+    if free_rects.is_empty() {
+        return;
+    }
+
+    for index in 0..free_rects.len() {
+        let free_rect = free_rects[index];
+
+        for &orientation in orientations {
+            if !free_rect.contains(orientation) {
+                continue;
+            }
+
+            let mut next_free_rects = Vec::new();
+
+            for (other_index, &other_rect) in free_rects.iter().enumerate() {
+                if other_index != index {
+                    next_free_rects.push(other_rect);
+                }
+            }
+
+            next_free_rects.extend(
+                split_free_rectangles(free_rect, orientation)
+            );
+
+            search_mixed(
+                next_free_rects,
+                orientations,
+                placed + 1,
+                best,
+            );
+        }
     }
 }
 fn is_better_capacity(candidate: Option<u32>, current: Option<u32>) -> bool {
@@ -391,4 +522,130 @@ mod tests {
         assert_eq!(result.item_width, 4.0);
         assert_eq!(result.item_height, 6.0);
     }
+    #[test]
+    fn mixed_orientation_can_exceed_uniform_orientation() {
+        let request = PackingRequest {
+            container: Container {
+                width: 5.0,
+                height: 5.0,
+            },
+            item: Item {
+                width: 2.0,
+                height: 3.0,
+            },
+            allow_rotation: true,
+        };
+
+        let result = calculate(&request);
+
+        assert_eq!(result.max_items, 3);
+    }
+    #[test]
+    fn splits_free_rectangle_after_placement() {
+       let free_rect = Rect {
+           x: 0.0,
+           y: 0.0,
+           width: 5.0,
+           height: 5.0,
+       };
+
+       let item = Dimensions::new(2.0, 3.0).unwrap();
+
+       let result = split_free_rectangles(free_rect, item);
+
+       assert_eq!(result.len(), 2);
+
+       assert_eq!(
+          result[0],
+          Rect {
+             x: 2.0,
+             y: 0.0,
+             width: 3.0,
+             height: 5.0,
+           }
+        );
+
+        assert_eq!(
+           result[1],
+           Rect {
+               x: 0.0,
+               y: 3.0,
+               width: 2.0,
+               height: 2.0,
+           }
+        );
+     }
+    #[test]
+    fn splits_free_rectangle_with_rotated_item() {
+       let free_rect = Rect {
+           x: 0.0,
+           y: 0.0,
+           width: 5.0,
+           height: 5.0,
+       };
+
+       let item = Dimensions::new(3.0, 2.0).unwrap();
+
+       let result = split_free_rectangles(free_rect, item);
+
+       assert_eq!(result.len(), 2);
+
+       assert_eq!(
+           result[0],
+           Rect {
+             x: 3.0,
+             y: 0.0,
+             width: 2.0,
+             height: 5.0,
+           }
+       );
+
+       assert_eq!(
+           result[1],
+           Rect {
+             x: 0.0,
+             y: 2.0,
+             width: 3.0,
+             height: 3.0,
+           }
+       );
+    }
+    #[test]
+    fn splitting_when_item_does_not_fit_returns_empty() {
+       let free_rect = Rect {
+           x: 0.0,
+           y: 0.0,
+           width: 2.0,
+           height: 2.0,
+       };
+
+       let item = Dimensions::new(2.0, 3.0).unwrap();
+
+       let result = split_free_rectangles(free_rect, item);
+
+       assert!(result.is_empty());
+    }
+   #[test]
+   fn search_mixed_finds_three_items() {
+      let container = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 5.0,
+        height: 5.0,
+      };
+
+      let item = Dimensions::new(2.0, 3.0).unwrap();
+      let orientations = [item, item.rotated()];
+
+      let mut best = 0;
+
+      search_mixed(
+        vec![container],
+        &orientations,
+        0,
+        &mut best,
+      );
+
+      assert_eq!(best, 3);
+   }
 }
