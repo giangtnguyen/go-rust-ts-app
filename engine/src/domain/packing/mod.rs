@@ -1,3 +1,5 @@
+mod dimensions;
+use dimensions::Dimensions;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -27,11 +29,34 @@ pub struct PackingResult {
     pub utilization: f64,
 }
 pub fn calculate(request: &PackingRequest) -> PackingResult {
-    let container_width = request.container.width;
-    let container_height = request.container.height;
-    let item_width = request.item.width;
-    let item_height = request.item.height;
+    let container = match Dimensions::new(request.container.width, request.container.height) {
+        Some(value) => value,
+        None => {
+            return PackingResult {
+                max_items: 0,
+                item_width: request.item.width,
+                item_height: request.item.height,
+                utilization: 0.0,
+            };
+        }
+    };
 
+    let item = match Dimensions::new(request.item.width, request.item.height) {
+        Some(value) => value,
+        None => {
+            return PackingResult {
+                max_items: 0,
+                item_width: request.item.width,
+                item_height: request.item.height,
+                utilization: 0.0,
+            };
+        }
+    };
+
+    let container_width = container.width;
+    let container_height = container.height;
+    let item_width = item.width;
+    let item_height = item.height;
     if !valid_dimensions(container_width, container_height, item_width, item_height) {
         return PackingResult {
             max_items: 0,
@@ -40,13 +65,10 @@ pub fn calculate(request: &PackingRequest) -> PackingResult {
             utilization: 0.0,
         };
     }
-    let (max_items, result_width, result_height) = choose_orientation(
-        container_width,
-        container_height,
-        item_width,
-        item_height,
-        request.allow_rotation,
-    );
+    let (max_items, result_item) = choose_orientation(container, item, request.allow_rotation);
+
+    let result_width = result_item.width;
+    let result_height = result_item.height;
     let max_items = match max_items {
         Some(value) => value,
         None => {
@@ -58,9 +80,8 @@ pub fn calculate(request: &PackingRequest) -> PackingResult {
             };
         }
     };
-    let used_area = max_items as f64 * item_width * item_height;
-    let container_area = container_width * container_height;
-
+    let used_area = max_items as f64 * item.area();
+    let container_area = container.area();
     let utilization = (used_area / container_area).clamp(0.0, 1.0);
 
     PackingResult {
@@ -79,24 +100,26 @@ fn is_better_capacity(candidate: Option<u32>, current: Option<u32>) -> bool {
     }
 }
 fn choose_orientation(
-    container_width: f64,
-    container_height: f64,
-    item_width: f64,
-    item_height: f64,
+    container: Dimensions,
+    item: Dimensions,
     allow_rotation: bool,
-) -> (Option<u32>, f64, f64) {
-    let normal = calculate_orientation(container_width, container_height, item_width, item_height);
-
-    let rotated = if allow_rotation {
-        calculate_orientation(container_width, container_height, item_height, item_width)
-    } else {
-        Some(0)
-    };
+) -> (Option<u32>, Dimensions) {
+    let normal = calculate_orientation(container.width, container.height, item.width, item.height);
+    if !allow_rotation {
+        return (normal, item);
+    }
+    let rotated_item = item.rotated();
+    let rotated = calculate_orientation(
+        container.width,
+        container.height,
+        rotated_item.width,
+        rotated_item.height,
+    );
 
     if is_better_capacity(rotated, normal) {
-        (rotated, item_height, item_width)
+        (rotated, rotated_item)
     } else {
-        (normal, item_width, item_height)
+        (normal, item)
     }
 }
 fn valid_dimensions(
