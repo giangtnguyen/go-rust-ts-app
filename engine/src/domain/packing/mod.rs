@@ -1,5 +1,9 @@
+mod carton_construction;
+mod carton_height;
 mod compression;
 mod dimensions;
+mod layer_stack;
+mod safety;
 use dimensions::Dimensions;
 use serde::{Deserialize, Serialize};
 
@@ -44,7 +48,20 @@ struct Placement {
     width: f64,
     height: f64,
 }
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PackingLayout {
+    placements: Vec<Placement>,
+}
 
+impl PackingLayout {
+    pub(crate) fn from_placements(placements: Vec<Placement>) -> Self {
+        Self { placements }
+    }
+
+    pub(crate) fn item_count(&self) -> u32 {
+        self.placements.len() as u32
+    }
+}
 impl Rect {
     fn contains(&self, item: Dimensions) -> bool {
         item.width <= self.width && item.height <= self.height
@@ -161,7 +178,7 @@ pub fn calculate(request: &PackingRequest) -> PackingResult {
         utilization,
     }
 }
-fn calculate_mixed_capacity(container: Dimensions, item: Dimensions) -> Vec<Placement> {
+pub(crate) fn calculate_mixed_capacity(container: Dimensions, item: Dimensions) -> Vec<Placement> {
     let orientations = [item, item.rotated()];
 
     let initial_free_rect = Rect {
@@ -768,5 +785,33 @@ mod tests {
 
         assert!(has_normal);
         assert!(has_rotated);
+    }
+    #[test]
+    fn calculates_required_outer_height_from_layer_stack() {
+        let compression = compression::CompressionModel::from_measurements(vec![
+            compression::CompressionMeasurement::new(3, 102.0).unwrap(),
+        ])
+        .unwrap();
+
+        let stack = layer_stack::LayerStack::new(vec![3, 3], compression);
+        let safety = safety::SafetyAllowance::new(10.0).unwrap();
+        let construction = carton_construction::CartonConstruction::new(10.0, 10.0).unwrap();
+
+        let compressed_height = stack.required_height().unwrap();
+        let inner_height = safety.apply(compressed_height).unwrap();
+        let outer_height = construction.outer_height(inner_height).unwrap();
+
+        assert_eq!(outer_height, 234.0);
+    }
+    #[test]
+    fn mixed_packing_returns_layout_with_item_count() {
+        let container = Dimensions::new(5.0, 5.0).unwrap();
+        let item = Dimensions::new(2.0, 3.0).unwrap();
+
+        let placements = calculate_mixed_capacity(container, item);
+
+        let layout = PackingLayout::from_placements(placements);
+
+        assert_eq!(layout.item_count(), 3);
     }
 }
