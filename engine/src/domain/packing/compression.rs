@@ -38,12 +38,41 @@ impl CompressionModel {
 
         Some(Self { measurements })
     }
-
     pub fn height_for(&self, pieces: u32) -> Option<f64> {
-        self.measurements
+        if pieces == 0 {
+            return None;
+        }
+
+        if let Some(measurement) = self
+            .measurements
             .iter()
             .find(|measurement| measurement.pieces == pieces)
-            .map(|measurement| measurement.height)
+        {
+            return Some(measurement.height);
+        }
+
+        let lower = self
+            .measurements
+            .iter()
+            .filter(|measurement| measurement.pieces < pieces)
+            .max_by_key(|measurement| measurement.pieces);
+
+        let upper = self
+            .measurements
+            .iter()
+            .filter(|measurement| measurement.pieces > pieces)
+            .min_by_key(|measurement| measurement.pieces);
+
+        match (lower, upper) {
+            (Some(lower), Some(upper)) => {
+                let piece_range = (upper.pieces - lower.pieces) as f64;
+                let height_range = upper.height - lower.height;
+                let position = (pieces - lower.pieces) as f64;
+
+                Some(lower.height + height_range * position / piece_range)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -109,8 +138,7 @@ mod tests {
             CompressionMeasurement::new(3, 102.0).unwrap(),
         ])
         .unwrap();
-
-        assert_eq!(model.height_for(2), None);
+        assert_eq!(model.height_for(2), Some(70.0));
         assert_eq!(model.height_for(4), None);
     }
     #[test]
@@ -135,11 +163,28 @@ mod tests {
             CompressionMeasurement::new(3, 102.0).unwrap(),
             CompressionMeasurement::new(4, 132.0).unwrap(),
         ])
-       .unwrap();
+        .unwrap();
 
-       assert_eq!(model.height_for(1), Some(38.0));
-       assert_eq!(model.height_for(3), Some(102.0));
-       assert_eq!(model.height_for(4), Some(132.0));
-       assert_eq!(model.height_for(2), None);
-   }
+        assert_eq!(model.height_for(1), Some(38.0));
+        assert_eq!(model.height_for(3), Some(102.0));
+        assert_eq!(model.height_for(4), Some(132.0));
+        assert_eq!(model.height_for(2), Some(70.0));
+    }
+    #[test]
+    fn interpolates_height_between_measurements() {
+        let model = CompressionModel::from_measurements(vec![
+            CompressionMeasurement::new(1, 38.0).unwrap(),
+            CompressionMeasurement::new(3, 102.0).unwrap(),
+        ])
+        .unwrap();
+
+        assert_eq!(model.height_for(1), Some(38.0));
+        assert_eq!(model.height_for(3), Some(102.0));
+
+        // Linear interpolation:
+        // 1 pc = 38 mm
+        // 3 pcs = 102 mm
+        // 2 pcs = 70 mm
+        assert_eq!(model.height_for(2), Some(70.0));
+    }
 }
